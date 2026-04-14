@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "agent-orchestration"
+version = "0.1.0"
+description = "Agent orchestration for Agentic Development through CLI"
+authors = ["NexWan <lcontrerasmartinez235@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "orchestrator"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+
+# --- Core SDKs ---
+claude-agent-sdk = "^0.1.58"
+openai-codex-sdk = "^0.1.11"
+anthropic = "^0.51.0"
+openai = "^1.70.0"
+
+# --- Async & Utils ---
+anyio = "^4.4.0"
+pydantic = "^2.7.0"
+python-dotenv = "^1.0.0"
+rich = "^13.7.0"
+typer = "^0.12.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+pytest-asyncio = "^0.23.0"
+ruff = "^0.4.0"
+mypy = "^1.10.0"
+
+[tool.poetry.scripts]
+orchestrate = "orchestrator.main:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry-core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
