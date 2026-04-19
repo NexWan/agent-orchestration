@@ -17,7 +17,7 @@ class AgentResult:
     agent_name: str
     role: AgentRole
     output: str = ""
-    files_written = list[str] = field(default_factory=list)
+    files_written: list[str] = field(default_factory=list)
     error: str | None = None
     tokens_used: int = 0
 
