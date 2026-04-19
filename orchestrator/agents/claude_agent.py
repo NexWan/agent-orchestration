@@ -51,7 +51,8 @@ Your Role: architect
 Your task: {task}
 
 IMPORTANT:
-- Your ONLY output is a single markdown file: ARCHITECTURE.md
+- Your MAIN output is a single markdown file: ARCHITECTURE.md
+- This file will serve as the blueprint for the implementer agent, so it must be clear and detailed about the components, their interactions, and the overall structure of the project.
 - Do NOT create any source code, configuration, or other files — those are handled by a separate implementer agent that will read your plan.
 - Write ARCHITECTURE.md to the workspace. Do not return its contents in chat.
 - Be concise. No lengthy explanations outside the file.
