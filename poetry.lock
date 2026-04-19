@@ -869,25 +869,6 @@ realtime = ["websockets (>=13,<16)"]
 voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
 
 [[package]]
-name = "openai-codex-sdk"
-version = "0.1.11"
-description = "Python SDK for the OpenAI Codex CLI (wraps the bundled codex binary)."
-optional = false
-python-versions = ">=3.10"
-groups = ["main"]
-files = [
-    {file = "openai_codex_sdk-0.1.11-py3-none-any.whl", hash = "sha256:0575fd99ad3310ead661d8c6d54f5c3bb6b45a6ff99f57377f30f19ea34a3cc0"},
-    {file = "openai_codex_sdk-0.1.11.tar.gz", hash = "sha256:2cb1ad6bc6318b419802f6f87e1cef2f3987580953d218933def281ff98929ab"},
-]
-
-[package.dependencies]
-pydantic = ">=2.7,<3"
-typing_extensions = ">=4.10"
-
-[package.extras]
-dev = ["mypy (>=1.10)", "pytest (>=8)", "pytest-asyncio (>=0.23)", "ruff (>=0.6)"]
-
-[[package]]
 name = "packaging"
 version = "26.0"
 description = "Core utilities for Python packages"
@@ -1666,4 +1647,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "aab5ebbd6411838e5ffed5eb4a27e9483a438fa46f519a89c37659dc754be536"
+content-hash = "e942ccdaf287f93c300f9a64edf4d21dc36345eacd4dc55f4d5031bd5d7ad79e"
