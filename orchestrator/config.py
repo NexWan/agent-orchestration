@@ -1,14 +1,23 @@
-from pydantic_settings import BaseSettings
+from __future__ import annotations
+
+from functools import lru_cache
 from pathlib import Path
 
-class Settings(BaseSettings): 
-    anthropic_api_key: str
-    openai_api_key: str
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
     codex_model: str = "gpt-5.3-codex"
+    claude_permission_mode: str = "acceptEdits"
     codex_repo_dir: Path = Path("./codex")
     codex_bin: Path | None = None
-    output_dir: Path = Path("./output")
+    generated_projects_dir: Path = Path("./generated-projects")
 
-    model_config = {"env_file": ".env"}
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-settings = Settings()
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
