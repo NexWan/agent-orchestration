@@ -1,6 +1,9 @@
-# orchestrator/agents/claude_agent.py
+from __future__ import annotations
+
+import time
 from pathlib import Path
 from typing import Any
+from typing import cast
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -9,223 +12,258 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
-    query,
 )
 
-from orchestrator.agents.base import AgentAdapter, AgentResult, AgentRole
+from orchestrator.agents.base import (
+    AgentAdapter,
+    AgentEvent,
+    AgentEventType,
+    AgentResult,
+    AgentRole,
+    AgentStatus,
+    EventHandler,
+    FeedbackProvider,
+    UsageMetrics,
+)
+from orchestrator.config import get_settings
 
-_ARCHITECT_TOOLS = ["Read", "Write", "Glob", "Grep"]
 
-
-class ClaudeArchitectAgent(AgentAdapter):
-
-    def __init__(self, working_dir: str | Path = "./output"):
-        self.cwd = Path(working_dir)
-        self.cwd.mkdir(parents=True, exist_ok=True)
-        self._files_written: list[str] = []
+class ClaudeWorkspaceAgent(AgentAdapter):
+    def __init__(
+        self,
+        *,
+        working_dir: str | Path,
+        agent_name: str,
+        role: AgentRole,
+        allowed_tools: list[str],
+        task_guidance: str,
+    ):
+        super().__init__(working_dir=working_dir)
+        self._name = agent_name
+        self._role = role
+        self.allowed_tools = allowed_tools
+        self.task_guidance = task_guidance
 
     @property
     def name(self) -> str:
-        return "ClaudeArchitectAgent"
+        return self._name
 
     @property
     def role(self) -> AgentRole:
-        return AgentRole.ARCHITECT
+        return self._role
 
     def build_prompt(self, task: str, context: dict[str, Any]) -> str:
-        project = context.get("project_description", "")
-        artifacts = context.get("artifacts", {})
-        phase = context.get("current_phase", 0)
+        base_prompt = super().build_prompt(task, context)
+        return (
+            f"{base_prompt}\n"
+            f"Role-specific guidance:\n{self.task_guidance}\n"
+        )
 
-        artifact_summary = ""
-        if artifacts:
-            artifact_summary = "\n\nArtifacts from previous phases:\n"
-            for name, content in artifacts.items():
-                preview = str(content)[:300] + "..." if len(str(content)) > 300 else str(content)
-                artifact_summary += f"- {name}: {preview}\n"
-
-        return f"""Project: {project}
-Current Phase: {phase}
-Your Role: architect
-{artifact_summary}
-Your task: {task}
-
-IMPORTANT:
-- Your MAIN output is a single markdown file: ARCHITECTURE.md
-- This file will serve as the blueprint for the implementer agent, so it must be clear and detailed about the components, their interactions, and the overall structure of the project.
-- Do NOT create any source code, configuration, or other files — those are handled by a separate implementer agent that will read your plan.
-- Write ARCHITECTURE.md to the workspace. Do not return its contents in chat.
-- Be concise. No lengthy explanations outside the file.
-"""
-
-    async def execute(self, prompt: str, context: dict[str, Any]) -> AgentResult:
-        full_prompt = self.build_prompt(prompt, context)
-        self._files_written = [] # reset for this execution
-        output_parts = []
-        tokens_used = 0
-
-        try:
-            async for message in query(
-                prompt=full_prompt,
-                options=ClaudeAgentOptions(
-                    allowed_tools=_ARCHITECT_TOOLS,
-                    permission_mode="acceptEdits",
-                    cwd=self.cwd,
-                ),
-            ):
-                # Texto y tool calls del agente
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            print(f"  [{self.name}] {block.text}")
-                            output_parts.append(block.text)
-                        elif isinstance(block, ToolUseBlock):
-                            await self._handle_tool_use(block)
-
-                # Resultado final con métricas
-                elif isinstance(message, ResultMessage):
-                    tokens_used = getattr(message, "total_cost_usd", 0)
-
-            return AgentResult(
-                success=True,
-                agent_name=self.name,
-                role=self.role,
-                output="\n".join(output_parts),
-                files_written=self._files_written,
-                tokens_used=tokens_used,
-            )
-
-        except Exception as e:
-            return AgentResult(
-                success=False,
-                agent_name=self.name,
-                role=self.role,
-                error=str(e),
-            )
-
-    async def execute_interactive(
+    async def execute(
         self,
         prompt: str,
         context: dict[str, Any],
-        plan_mode: bool = False,
+        event_handler: EventHandler | None = None,
+        feedback_provider: FeedbackProvider | None = None,
     ) -> AgentResult:
-        """
-        Interactive back-and-forth loop, like Claude Code's plan mode.
-
-        Uses ClaudeSDKClient to keep a single persistent session across all
-        turns. Each turn the agent runs, then pauses for user input.
-
-        If plan_mode=True the session starts in 'plan' permission mode so the
-        agent can only read files and propose changes. After the user presses
-        Enter to approve, the mode switches to 'acceptEdits' and the agent
-        executes its plan within the same conversation.
-        """
-        self._files_written = []
+        started_at = time.perf_counter()
+        before_snapshot = self._snapshot_workspace()
         output_parts: list[str] = []
-        tokens_used = 0
-        in_plan_phase = plan_mode
+        files_written: list[str] = []
+        usage = UsageMetrics()
+        full_prompt = self.build_prompt(prompt, context)
+        settings = get_settings()
 
-        initial_prompt = self.build_prompt(prompt, context)
-        if plan_mode:
-            initial_prompt += (
-                "\n\nIMPORTANT: This is the PLANNING phase. "
-                "Do NOT write any files yet. Describe the architecture you would "
-                "implement and list every file you plan to create. "
-                "Wait for approval before writing anything."
-            )
+        await self._emit(
+            event_handler,
+            AgentEvent(
+                event_type=AgentEventType.AGENT_STARTED,
+                agent_name=self.name,
+                role=self.role,
+                message=f"Working in {self.cwd}",
+                status=AgentStatus.RUNNING,
+            ),
+        )
 
         options = ClaudeAgentOptions(
-            allowed_tools=_ARCHITECT_TOOLS,
-            permission_mode="plan" if plan_mode else "acceptEdits",
+            allowed_tools=self.allowed_tools,
+            permission_mode=cast(Any, settings.claude_permission_mode),
             cwd=self.cwd,
         )
 
         try:
             async with ClaudeSDKClient(options=options) as client:
-                # Kick off the first turn
-                await client.query(initial_prompt)
+                await client.query(full_prompt)
 
                 while True:
-                    # Drain messages until the agent finishes this turn
-                    async for message in client.receive_response():
-                        if isinstance(message, AssistantMessage):
-                            for block in message.content:
-                                if isinstance(block, TextBlock):
-                                    print(f"  [{self.name}] {block.text}")
-                                    output_parts.append(block.text)
-                                elif isinstance(block, ToolUseBlock):
-                                    await self._handle_tool_use(block)
-                        elif isinstance(message, ResultMessage):
-                            tokens_used = getattr(message, "total_cost_usd", 0)
+                    usage = usage.merge(
+                        await self._drain_response(
+                            client=client,
+                            event_handler=event_handler,
+                            output_parts=output_parts,
+                            files_written=files_written,
+                        )
+                    )
 
-                    # Prompt the user
-                    print("\n" + "─" * 60)
-                    if in_plan_phase:
-                        print("PLAN MODE  |  approve to execute, or type feedback to refine")
-                    else:
-                        print("Type feedback to refine, or press Enter to finish")
-                    print("  [Enter]       approve / finish")
-                    print("  [your text]   send feedback to the agent")
-                    print("  quit          cancel")
-                    print("─" * 60)
-
-                    user_input = input("> ").strip()
-
-                    if not user_input:
-                        if in_plan_phase:
-                            # Switch to execute mode and continue in the same session
-                            await client.set_permission_mode("acceptEdits")
-                            in_plan_phase = False
-                            await client.query(
-                                "The plan is approved. Now execute it: "
-                                "write all the files you proposed."
-                            )
-                            continue
-                        break  # User is satisfied — done
-
-                    if user_input.lower() in ("quit", "exit", "cancel"):
-                        return AgentResult(
-                            success=False,
+                    await self._emit(
+                        event_handler,
+                        AgentEvent(
+                            event_type=AgentEventType.STATUS_CHANGED,
                             agent_name=self.name,
                             role=self.role,
-                            error="Cancelled by user",
+                            message="Waiting for feedback",
+                            status=AgentStatus.WAITING_FOR_FEEDBACK,
+                        ),
+                    )
+                    feedback = await self._request_feedback(
+                        feedback_provider,
+                        f"Feedback for {self.name}. Press Enter to continue.",
+                    )
+                    if not feedback:
+                        break
+
+                    await self._emit(
+                        event_handler,
+                        AgentEvent(
+                            event_type=AgentEventType.STATUS_CHANGED,
+                            agent_name=self.name,
+                            role=self.role,
+                            message="Applying user feedback",
+                            status=AgentStatus.RUNNING,
+                        ),
+                    )
+                    await client.query(feedback)
+
+            if not files_written:
+                files_written = self._detect_workspace_changes(before_snapshot)
+
+            return self._new_result(
+                success=True,
+                output="\n".join(part for part in output_parts if part.strip()),
+                files_written=files_written,
+                usage=usage,
+                workspace_path=str(self.cwd),
+                final_status=AgentStatus.COMPLETED,
+                started_at=started_at,
+            )
+        except Exception as exc:
+            await self._emit(
+                event_handler,
+                AgentEvent(
+                    event_type=AgentEventType.AGENT_FAILED,
+                    agent_name=self.name,
+                    role=self.role,
+                    message=str(exc),
+                    status=AgentStatus.FAILED,
+                ),
+            )
+            return self._new_result(
+                success=False,
+                error=str(exc),
+                usage=usage,
+                workspace_path=str(self.cwd),
+                final_status=AgentStatus.FAILED,
+                started_at=started_at,
+            )
+
+    async def _drain_response(
+        self,
+        *,
+        client: ClaudeSDKClient,
+        event_handler: EventHandler | None,
+        output_parts: list[str],
+        files_written: list[str],
+    ) -> UsageMetrics:
+        usage = UsageMetrics()
+        async for message in client.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        text = block.text.strip()
+                        if text:
+                            output_parts.append(text)
+                            await self._emit(
+                                event_handler,
+                                AgentEvent(
+                                    event_type=AgentEventType.MESSAGE,
+                                    agent_name=self.name,
+                                    role=self.role,
+                                    message=text,
+                                    status=AgentStatus.RUNNING,
+                                ),
+                            )
+                    elif isinstance(block, ToolUseBlock):
+                        tool_name = block.name
+                        tool_input = getattr(block, "input", {}) or {}
+                        path = tool_input.get("file_path")
+                        if tool_name in {"Write", "Edit"} and path and path not in files_written:
+                            files_written.append(path)
+                            await self._emit(
+                                event_handler,
+                                AgentEvent(
+                                    event_type=AgentEventType.FILE_CHANGED,
+                                    agent_name=self.name,
+                                    role=self.role,
+                                    message=f"{tool_name} {path}",
+                                    path=path,
+                                    status=AgentStatus.RUNNING,
+                                ),
+                            )
+
+                        await self._emit(
+                            event_handler,
+                            AgentEvent(
+                                event_type=AgentEventType.TOOL_ACTIVITY,
+                                agent_name=self.name,
+                                role=self.role,
+                                message=tool_name,
+                                status=AgentStatus.RUNNING,
+                                details={"tool_name": tool_name, "input": tool_input},
+                            ),
                         )
 
-                    # Send feedback; agent replies in the same session
-                    await client.query(user_input)
+            elif isinstance(message, ResultMessage):
+                usage = usage.merge(UsageMetrics(cost_usd=float(message.total_cost_usd or 0.0)))
+                await self._emit(
+                    event_handler,
+                    AgentEvent(
+                        event_type=AgentEventType.TURN_COMPLETED,
+                        agent_name=self.name,
+                        role=self.role,
+                        message="Turn completed",
+                        status=AgentStatus.RUNNING,
+                    ),
+                )
+                return usage
 
-            return AgentResult(
-                success=True,
-                agent_name=self.name,
-                role=self.role,
-                output="\n".join(output_parts),
-                files_written=self._files_written,
-                tokens_used=tokens_used,
-            )
+        return usage
 
-        except Exception as e:
-            return AgentResult(
-                success=False,
-                agent_name=self.name,
-                role=self.role,
-                error=str(e),
-            )
 
-    async def _handle_tool_use(self, block: ToolUseBlock) -> None:
-        """Loggea y trackea cada tool call del agente."""
-        tool_name = block.name
-        tool_input = getattr(block, "input", {})
+class ArchitectClaudeAgent(ClaudeWorkspaceAgent):
+    def __init__(self, working_dir: str | Path):
+        super().__init__(
+            working_dir=working_dir,
+            agent_name="ArchitectClaudeAgent",
+            role=AgentRole.ARCHITECT,
+            allowed_tools=["Read", "Write", "Glob", "Grep"],
+            task_guidance=(
+                "- Your primary output is ARCHITECTURE.md inside the specs directory.\n"
+                "- Do not implement source code.\n"
+                "- Capture system structure, backend/frontend responsibilities, and testing strategy."
+            ),
+        )
 
-        match tool_name:
-            case "Write" | "Edit":
-                path = tool_input.get("file_path", "?")
-                self._files_written.append(path)
-                print(f"  📝 {tool_name}: {path}")
-            case "Bash":
-                cmd = tool_input.get("command", "?")
-                print(f"  ⚡ Bash: {cmd[:80]}")
-            case "Read" | "Glob" | "Grep":
-                target = tool_input.get("file_path") or tool_input.get("pattern", "?")
-                print(f"  🔍 {tool_name}: {target}")
-            case _:
-                print(f"  🔧 {tool_name}")
+
+class FrontendClaudeAgent(ClaudeWorkspaceAgent):
+    def __init__(self, working_dir: str | Path):
+        super().__init__(
+            working_dir=working_dir,
+            agent_name="FrontendClaudeAgent",
+            role=AgentRole.FRONTEND,
+            allowed_tools=["Read", "Write", "Edit", "Glob", "Grep"],
+            task_guidance=(
+                "- Build the frontend inside the assigned frontend workspace.\n"
+                "- Follow the architecture and integrate with the backend contract.\n"
+                "- Prefer production-ready files over prose descriptions."
+            ),
+        )
