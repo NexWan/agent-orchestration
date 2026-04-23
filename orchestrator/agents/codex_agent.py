@@ -129,6 +129,16 @@ class CodexWorkspaceAgent(AgentAdapter):
                             status=AgentStatus.WAITING_FOR_FEEDBACK,
                         ),
                     )
+                    await self._emit(
+                        event_handler,
+                        AgentEvent(
+                            event_type=AgentEventType.APPROVAL_REQUESTED,
+                            agent_name=self.name,
+                            role=self.role,
+                            message="Feedback requested",
+                            status=AgentStatus.WAITING_FOR_FEEDBACK,
+                        ),
+                    )
                     feedback = await self._request_feedback(
                         feedback_provider,
                         f"Feedback for {self.name}. Press Enter to continue.",
@@ -325,6 +335,21 @@ class QaCodexAgent(CodexWorkspaceAgent):
                 "- Create tests for both backend and frontend based on the architecture and implementation.\n"
                 "- Prefer writing tests into backend and frontend test directories.\n"
                 "- Write a short QA summary report in the QA metadata area."
+            ),
+            model=model,
+        )
+
+
+class DockerCodexAgent(CodexWorkspaceAgent):
+    def __init__(self, working_dir: str | Path, model: str | None = None):
+        super().__init__(
+            working_dir=working_dir,
+            agent_name="DockerCodexAgent",
+            role=AgentRole.DOCKER,
+            task_guidance=(
+                "- Create Dockerfiles, docker-compose.yml, and supporting container assets needed to run the generated app.\n"
+                "- Cover backend, frontend, and any required supporting services.\n"
+                "- Keep the Docker setup aligned with the generated project structure and write files at the project root when appropriate."
             ),
             model=model,
         )

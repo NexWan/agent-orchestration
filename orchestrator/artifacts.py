@@ -14,6 +14,8 @@ class ArtifactType(Enum):
     FRONTEND_SOURCE = "frontend_source"
     TEST_SUITE = "test_suite"
     QA_REPORT = "qa_report"
+    DOCKER_ASSETS = "docker_assets"
+    VALIDATION_REPORT = "validation_report"
 
 
 @dataclass(slots=True)
