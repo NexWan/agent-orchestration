@@ -76,6 +76,8 @@ async def test_orchestration_session_respects_stage_dependencies(tmp_path):
         "backend": FakeAgent(session.workspace_plan.backend_dir, "backend", AgentRole.BACKEND, "app.py", calls),
         "frontend": FakeAgent(session.workspace_plan.frontend_dir, "frontend", AgentRole.FRONTEND, "index.html", calls),
         "qa": FakeAgent(session.workspace_plan.qa_scope_dir, "qa", AgentRole.QA, "QA_REPORT.md", calls),
+        "docker": FakeAgent(session.workspace_plan.docker_scope_dir, "docker", AgentRole.DOCKER, "docker-compose.yml", calls),
+        "validator": FakeAgent(session.workspace_plan.validator_scope_dir, "validator", AgentRole.VALIDATOR, "VALIDATION_REPORT.md", calls),
     }
     seen_events: list[str] = []
 
@@ -84,10 +86,12 @@ async def test_orchestration_session_respects_stage_dependencies(tmp_path):
 
     results = await session.run(agents=agents, event_handler=handler, feedback_provider=lambda request: None)
 
-    assert [name for name, _ in calls] == ["architect", "backend", "frontend", "qa"]
+    assert [name for name, _ in calls] == ["architect", "backend", "frontend", "qa", "docker", "validator"]
     assert calls[0][1] == ["product_brief"]
     assert "architecture" in calls[1][1]
     assert "backend_source" in calls[2][1]
     assert "frontend_source" in calls[3][1]
-    assert len(results.results) == 4
-    assert seen_events == ["architect", "backend", "frontend", "qa"]
+    assert "frontend_source" in calls[4][1]
+    assert "docker_assets" in calls[5][1]
+    assert len(results.results) == 6
+    assert seen_events == ["architect", "backend", "frontend", "qa", "docker", "validator"]

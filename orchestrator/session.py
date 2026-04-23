@@ -5,8 +5,12 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from orchestrator.agents.base import AgentAdapter, AgentResult, FeedbackRequest
-from orchestrator.agents.claude_agent import ArchitectClaudeAgent, FrontendClaudeAgent
-from orchestrator.agents.codex_agent import BackendCodexAgent, QaCodexAgent
+from orchestrator.agents.claude_agent import (
+    ArchitectClaudeAgent,
+    FrontendClaudeAgent,
+    RuntimeValidationClaudeAgent,
+)
+from orchestrator.agents.codex_agent import BackendCodexAgent, DockerCodexAgent, QaCodexAgent
 from orchestrator.artifacts import ArtifactStore, ArtifactType
 from orchestrator.project import ProjectSpec, WorkspacePlan, build_workspace_plan, render_project_brief
 
@@ -103,6 +107,46 @@ class OrchestrationSession:
         self._register_stage_outputs("qa", ArtifactType.TEST_SUITE, self.workspace_plan.root)
         self._register_qa_report()
 
+        docker_result = await self._run_stage(
+            agent=stage_agents["docker"],
+            prompt=(
+                "Create containerization assets for the generated project. "
+                "Add Dockerfiles, a docker-compose.yml setup, and any service configuration needed "
+                "to run the backend and frontend together."
+            ),
+            artifact_types=[
+                ArtifactType.PRODUCT_BRIEF,
+                ArtifactType.ARCHITECTURE,
+                ArtifactType.BACKEND_SOURCE,
+                ArtifactType.FRONTEND_SOURCE,
+            ],
+            event_handler=event_handler,
+            feedback_provider=feedback_provider,
+        )
+        results.append(docker_result)
+        self._register_docker_outputs()
+
+        validator_result = await self._run_stage(
+            agent=stage_agents["validator"],
+            prompt=(
+                "Validate the generated application end to end. "
+                "Try the expected install and startup flows for backend and frontend, fix setup problems, "
+                "and write a validation report under the validation metadata directory."
+            ),
+            artifact_types=[
+                ArtifactType.PRODUCT_BRIEF,
+                ArtifactType.ARCHITECTURE,
+                ArtifactType.BACKEND_SOURCE,
+                ArtifactType.FRONTEND_SOURCE,
+                ArtifactType.TEST_SUITE,
+                ArtifactType.DOCKER_ASSETS,
+            ],
+            event_handler=event_handler,
+            feedback_provider=feedback_provider,
+        )
+        results.append(validator_result)
+        self._register_validation_report()
+
         return OrchestrationResults(
             workspace_plan=self.workspace_plan,
             artifact_store=self.artifact_store,
@@ -115,6 +159,8 @@ class OrchestrationSession:
             "backend": BackendCodexAgent(self.workspace_plan.backend_dir),
             "frontend": FrontendClaudeAgent(self.workspace_plan.frontend_dir),
             "qa": QaCodexAgent(self.workspace_plan.qa_scope_dir),
+            "docker": DockerCodexAgent(self.workspace_plan.docker_scope_dir),
+            "validator": RuntimeValidationClaudeAgent(self.workspace_plan.validator_scope_dir),
         }
 
     async def _run_stage(
@@ -167,3 +213,28 @@ class OrchestrationSession:
         ]:
             if candidate.exists():
                 self.artifact_store.register_file(ArtifactType.QA_REPORT, "qa", candidate)
+
+    def _register_docker_outputs(self) -> None:
+        candidates = [
+            self.workspace_plan.root / "docker-compose.yml",
+            self.workspace_plan.root / "docker-compose.yaml",
+            self.workspace_plan.root / "Dockerfile",
+            self.workspace_plan.backend_dir / "Dockerfile",
+            self.workspace_plan.frontend_dir / "Dockerfile",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                self.artifact_store.register_file(ArtifactType.DOCKER_ASSETS, "docker", candidate)
+
+    def _register_validation_report(self) -> None:
+        candidates = [
+            self.workspace_plan.validation_dir / "VALIDATION_REPORT.md",
+            self.workspace_plan.root / "VALIDATION_REPORT.md",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                self.artifact_store.register_file(
+                    ArtifactType.VALIDATION_REPORT,
+                    "validator",
+                    candidate,
+                )

@@ -33,6 +33,7 @@ class WorkspacePlan:
     backend_dir: Path
     frontend_dir: Path
     qa_dir: Path
+    validation_dir: Path
 
     @property
     def architect_dir(self) -> Path:
@@ -40,6 +41,14 @@ class WorkspacePlan:
 
     @property
     def qa_scope_dir(self) -> Path:
+        return self.root
+
+    @property
+    def docker_scope_dir(self) -> Path:
+        return self.root
+
+    @property
+    def validator_scope_dir(self) -> Path:
         return self.root
 
     def ensure_directories(self) -> None:
@@ -50,6 +59,7 @@ class WorkspacePlan:
             self.backend_dir,
             self.frontend_dir,
             self.qa_dir,
+            self.validation_dir,
         ]:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -59,6 +69,7 @@ def build_workspace_plan(spec: ProjectSpec) -> WorkspacePlan:
     metadata_dir = root / ".orchestrator"
     specs_dir = metadata_dir / "specs"
     qa_dir = metadata_dir / "qa"
+    validation_dir = metadata_dir / "validation"
 
     if spec.layout is ProjectLayout.MONOREPO:
         backend_dir = root / "backend"
@@ -74,6 +85,7 @@ def build_workspace_plan(spec: ProjectSpec) -> WorkspacePlan:
         backend_dir=backend_dir,
         frontend_dir=frontend_dir,
         qa_dir=qa_dir,
+        validation_dir=validation_dir,
     )
 
 
@@ -98,4 +110,5 @@ def render_project_brief(spec: ProjectSpec, workspace_plan: WorkspacePlan) -> st
         f"- Backend: {workspace_plan.backend_dir}\n"
         f"- Frontend: {workspace_plan.frontend_dir}\n"
         f"- QA metadata: {workspace_plan.qa_dir}\n"
+        f"- Validation metadata: {workspace_plan.validation_dir}\n"
     )

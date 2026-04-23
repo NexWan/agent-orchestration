@@ -14,6 +14,8 @@ class AgentRole(Enum):
     BACKEND = "backend"
     FRONTEND = "frontend"
     QA = "qa"
+    DOCKER = "docker"
+    VALIDATOR = "validator"
 
 
 class AgentStatus(Enum):

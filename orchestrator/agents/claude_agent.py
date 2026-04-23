@@ -115,6 +115,16 @@ class ClaudeWorkspaceAgent(AgentAdapter):
                             status=AgentStatus.WAITING_FOR_FEEDBACK,
                         ),
                     )
+                    await self._emit(
+                        event_handler,
+                        AgentEvent(
+                            event_type=AgentEventType.APPROVAL_REQUESTED,
+                            agent_name=self.name,
+                            role=self.role,
+                            message="Feedback requested",
+                            status=AgentStatus.WAITING_FOR_FEEDBACK,
+                        ),
+                    )
                     feedback = await self._request_feedback(
                         feedback_provider,
                         f"Feedback for {self.name}. Press Enter to continue.",
@@ -265,5 +275,21 @@ class FrontendClaudeAgent(ClaudeWorkspaceAgent):
                 "- Build the frontend inside the assigned frontend workspace.\n"
                 "- Follow the architecture and integrate with the backend contract.\n"
                 "- Prefer production-ready files over prose descriptions."
+            ),
+        )
+
+
+class RuntimeValidationClaudeAgent(ClaudeWorkspaceAgent):
+    def __init__(self, working_dir: str | Path):
+        super().__init__(
+            working_dir=working_dir,
+            agent_name="RuntimeValidationClaudeAgent",
+            role=AgentRole.VALIDATOR,
+            allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+            task_guidance=(
+                "- Validate that the generated backend and frontend can actually be installed and started.\n"
+                "- Use shell commands to inspect setup, install dependencies, and run startup commands when needed.\n"
+                "- Fix broken setup issues you find, such as missing scripts, dependencies, or run instructions.\n"
+                "- Write a validation report into the validation metadata directory describing what worked and what was fixed."
             ),
         )
