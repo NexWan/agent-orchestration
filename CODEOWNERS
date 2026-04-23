@@ -1,0 +1,6 @@
+* @NexWan
+
+/orchestrator/main.py @NexWan
+/orchestrator/agents/ @NexWan
+/orchestrator/tests/ @NexWan
+/orchestrator/session.py @NexWan

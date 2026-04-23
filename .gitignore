@@ -1,5 +1,7 @@
 .env
 .vscode/
 output/
+generated-projects/
 __pycache__/
 codex/
+.codex/
